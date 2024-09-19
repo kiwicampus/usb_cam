@@ -326,15 +326,15 @@ void UsbCamNode::set_v4l2_params()
 
   // check auto exposure
   if (!m_parameters.autoexposure) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure_auto' to %d", 1);
+    RCLCPP_INFO(this->get_logger(), "Setting 'auto_exposure' to %d", 1);
     RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to %d", m_parameters.exposure);
     // turn down exposure control (from max of 3)
-    m_camera->set_v4l_parameter("exposure_auto", 1);
+    m_camera->set_v4l_parameter("auto_exposure", 1);
     // change the exposure level
     m_camera->set_v4l_parameter("exposure_absolute", m_parameters.exposure);
   } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure_auto' to %d", 3);
-    m_camera->set_v4l_parameter("exposure_auto", 3);
+    RCLCPP_INFO(this->get_logger(), "Setting 'auto_exposure' to %d", 3);
+    m_camera->set_v4l_parameter("auto_exposure", 3);
   }
 
   // check auto focus
