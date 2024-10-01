@@ -49,6 +49,7 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
       rclcpp::QoS {100}.get_rmw_qos_profile()))),
   m_compressed_image_publisher(nullptr),
   m_compressed_cam_info_publisher(nullptr),
+  m_status_publisher(nullptr),
   m_parameters(),
   m_camera_info_msg(new sensor_msgs::msg::CameraInfo()),
   m_service_capture(
@@ -182,6 +183,13 @@ void UsbCamNode::init()
       "camera_info", rclcpp::QoS(100));
   }
 
+  // Kiwi added: Status publisher
+  // In intra process communication, we cant use transient local,
+  // so we disable the intra process for this publisher
+  rclcpp::PublisherOptionsWithAllocator<std::allocator<void>> options;
+  options.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
+  m_status_publisher = this->create_publisher<std_msgs::msg::UInt8>("status", rclcpp::QoS(1).keep_all().transient_local().reliable(), options);
+
   m_image_msg->header.frame_id = m_parameters.frame_id;
   RCLCPP_INFO(
     this->get_logger(), "Starting '%s' (%s) at %dx%d via %s (%s) at %i FPS",
@@ -214,6 +222,11 @@ void UsbCamNode::init()
     std::chrono::milliseconds(static_cast<int64_t>(period_ms)),
     std::bind(&UsbCamNode::update, this));
   RCLCPP_INFO_STREAM(this->get_logger(), "Timer triggering every " << period_ms << " ms");
+
+  // Kiwi added: Status publisher
+  m_status = std::make_shared<std_msgs::msg::UInt8>();
+  m_status->data = Status::ONLINE;
+  m_status_publisher->publish(*m_status);
 }
 
 void UsbCamNode::get_params()
@@ -369,7 +382,23 @@ bool UsbCamNode::take_and_send_image()
   }
 
   // grab the image, pass image msg buffer to fill
-  m_camera->get_image(reinterpret_cast<char *>(&m_image_msg->data[0]));
+  try
+  {
+    m_camera->get_image(reinterpret_cast<char *>(&m_image_msg->data[0]));
+  }
+  catch(const std::exception& e)
+  {
+    std::cerr << "Error: " << e.what() << '\n';
+    m_status->data = Status::DISCONNECTED;
+    m_status_publisher->publish(*m_status);
+    // Kiwi added: initialize the camera from the parameters
+    // m_camera->configure(m_parameters, m_camera->get_io_method());
+    // m_camera->start();
+    // stop the timer
+    m_timer->cancel();
+    return false;
+  }
+  
 
   auto stamp = m_camera->get_image_timestamp();
   m_image_msg->header.stamp.sec = stamp.tv_sec;
@@ -390,7 +419,23 @@ bool UsbCamNode::take_and_send_image_mjpeg()
   }
 
   // grab the image, pass image msg buffer to fill
-  m_camera->get_image(reinterpret_cast<char *>(&m_compressed_img_msg->data[0]));
+  try
+  {
+    m_camera->get_image(reinterpret_cast<char *>(&m_compressed_img_msg->data[0]));
+  }
+  catch(const std::exception& e)
+  {
+    std::cerr << "Error: " << e.what() << '\n';
+    m_status->data = Status::DISCONNECTED;
+    m_status_publisher->publish(*m_status);
+    // Kiwi added: initialize the camera from the parameters
+    // m_camera->configure(m_parameters, m_camera->get_io_method());
+    // m_camera->start();
+    // stop the timer
+    m_timer->cancel();
+    return false;
+  }
+  
 
   auto stamp = m_camera->get_image_timestamp();
   m_compressed_img_msg->header.stamp.sec = stamp.tv_sec;
@@ -428,7 +473,14 @@ void UsbCamNode::update()
       take_and_send_image();
     if (!isSuccessful) {
       RCLCPP_WARN_ONCE(this->get_logger(), "USB camera did not respond in time.");
+      // Kiwi added: publish the status
+      m_status->data = Status::READING_ERROR;
+      m_status_publisher->publish(*m_status);
     }
+  }
+  else {
+    m_status->data = Status::DISCONNECTED;
+    m_status_publisher->publish(*m_status);
   }
 }
 }  // namespace usb_cam
