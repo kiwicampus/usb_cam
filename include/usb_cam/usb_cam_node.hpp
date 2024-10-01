@@ -40,6 +40,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/compressed_image.hpp"
+#include "std_msgs/msg/u_int8.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 
 #include "usb_cam/usb_cam.hpp"
@@ -84,9 +85,22 @@ public:
   std::shared_ptr<image_transport::CameraPublisher> m_image_publisher;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr m_compressed_image_publisher;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_compressed_cam_info_publisher;
+  rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr m_status_publisher;
 
   parameters_t m_parameters;
 
+  // Kiwi added: Status publisher
+  enum Status
+  {
+      UNRECOGNIZED = 0,
+      ONLINE = 1,
+      DISCONNECTED = 2,
+      LOST = 3,
+      READING_ERROR = 4,
+      PAUSED = 5,
+      TURNED_OFF = 6,
+  };
+  std::shared_ptr<std_msgs::msg::UInt8> m_status;
   sensor_msgs::msg::CameraInfo::SharedPtr m_camera_info_msg;
   std::shared_ptr<camera_info_manager::CameraInfoManager> m_camera_info;
 
