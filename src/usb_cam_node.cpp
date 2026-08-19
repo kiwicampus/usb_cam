@@ -86,6 +86,18 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
   this->declare_parameter("enable_undistortion", false);
   this->declare_parameter("stabilization_frames", 10);
   this->declare_parameter("enable_camera_controls", false);
+  // Mirror every raw frame into shared memory, announced as shm_ros/ShmImage on
+  // <image topic>_shm. The segment is only created once something subscribes.
+  this->declare_parameter("publish_shm", true);
+
+  if (this->get_parameter("publish_shm").as_bool()) {
+    m_shm_publisher = std::make_unique<shm_ros::ImagePublisher>(
+      *this, std::string(BASE_TOPIC_NAME) + "_shm", rclcpp::QoS{1});
+    RCLCPP_INFO_STREAM(
+      this->get_logger(), "shm publisher announcing " << m_shm_publisher->topic_name()
+                                                      << " -> /dev/shm/"
+                                                      << m_shm_publisher->segment_name());
+  }
 
   get_params();
   init();
@@ -393,6 +405,13 @@ bool UsbCamNode::take_and_send_image()
 
   *m_camera_info_msg = m_camera_info->getCameraInfo();
   m_camera_info_msg->header = m_image_msg->header;
+  // Write and announce before handing the message on. step is passed through, so
+  // a padded v4l2 buffer is described honestly rather than assumed packed.
+  if (m_shm_publisher && !m_image_msg->data.empty()) {
+    m_shm_publisher->publish(
+      m_image_msg->data.data(), m_image_msg->data.size(), m_image_msg->width,
+      m_image_msg->height, m_image_msg->encoding, m_image_msg->step, m_image_msg->header);
+  }
   m_image_publisher->publish(*m_image_msg, *m_camera_info_msg);
   return true;
 }
