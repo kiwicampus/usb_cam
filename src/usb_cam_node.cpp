@@ -66,13 +66,13 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
   this->declare_parameter("camera_info_url", "");
   this->declare_parameter("framerate", 30.0);
   this->declare_parameter("frame_id", "default_cam");
-  this->declare_parameter("image_height", 480);
+  this->declare_parameter("image_height", 360);
   this->declare_parameter("image_width", 640);
   this->declare_parameter("io_method", "mmap");
   this->declare_parameter("pixel_format", "yuyv");
   this->declare_parameter("av_device_format", "YUV422P");
   this->declare_parameter("video_device", "/dev/video0");
-  this->declare_parameter("brightness", 50);  // 0-255, -1 "leave alone"
+  this->declare_parameter("brightness", -1);  // 0-255, -1 "leave alone"
   this->declare_parameter("contrast", -1);    // 0-255, -1 "leave alone"
   this->declare_parameter("saturation", -1);  // 0-255, -1 "leave alone"
   this->declare_parameter("sharpness", -1);   // 0-255, -1 "leave alone"
@@ -83,6 +83,21 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
   this->declare_parameter("exposure", 100);
   this->declare_parameter("autofocus", false);
   this->declare_parameter("focus", -1);  // 0-255, -1 "leave alone"
+  this->declare_parameter("enable_undistortion", false);
+  this->declare_parameter("stabilization_frames", 10);
+  this->declare_parameter("enable_camera_controls", false);
+  // Mirror every raw frame into shared memory, announced as shm_ros/ShmImage on
+  // <image topic>_shm. The segment is only created once something subscribes.
+  this->declare_parameter("publish_shm", true);
+
+  if (this->get_parameter("publish_shm").as_bool()) {
+    m_shm_publisher = std::make_unique<shm_ros::ImagePublisher>(
+      *this, std::string(BASE_TOPIC_NAME) + "_shm", rclcpp::QoS{1});
+    RCLCPP_INFO_STREAM(
+      this->get_logger(), "shm publisher announcing " << m_shm_publisher->topic_name()
+                                                      << " -> /dev/shm/"
+                                                      << m_shm_publisher->segment_name());
+  }
 
   get_params();
   init();
@@ -124,8 +139,15 @@ void UsbCamNode::service_capture(
 std::string resolve_device_path(const std::string & path)
 {
   if (std::filesystem::is_symlink(path)) {
-    // For some reason read_symlink only returns videox
-    return "/dev/" + std::string(std::filesystem::read_symlink(path));
+    std::filesystem::path target_path = std::filesystem::read_symlink(path);
+
+    // if the target path is relative, resolve it
+    if (target_path.is_relative()) {
+      target_path = std::filesystem::absolute(path).parent_path() / target_path;
+      target_path = std::filesystem::canonical(target_path);
+    }
+
+    return target_path.string();
   }
   return path;
 }
@@ -224,7 +246,7 @@ void UsbCamNode::get_params()
       "camera_name", "camera_info_url", "frame_id", "framerate", "image_height", "image_width",
       "io_method", "pixel_format", "av_device_format", "video_device", "brightness", "contrast",
       "saturation", "sharpness", "gain", "auto_white_balance", "white_balance", "autoexposure",
-      "exposure", "autofocus", "focus"
+      "exposure", "autofocus", "focus", "enable_undistortion", "stabilization_frames", "enable_camera_controls"
     }
   );
 
@@ -278,6 +300,12 @@ void UsbCamNode::assign_params(const std::vector<rclcpp::Parameter> & parameters
       m_parameters.autofocus = parameter.as_bool();
     } else if (parameter.get_name() == "focus") {
       m_parameters.focus = parameter.as_int();
+    } else if (parameter.get_name() == "enable_undistortion") {
+      m_parameters.enable_undistortion = parameter.as_bool();
+    } else if (parameter.get_name() == "stabilization_frames") {
+      m_parameters.stabilization_frames = parameter.as_int();
+    } else if (parameter.get_name() == "enable_camera_controls") {
+      m_parameters.enable_camera_controls = parameter.as_bool();
     } else {
       RCLCPP_WARN(this->get_logger(), "Invalid parameter name: %s", parameter.get_name().c_str());
     }
@@ -326,15 +354,15 @@ void UsbCamNode::set_v4l2_params()
 
   // check auto exposure
   if (!m_parameters.autoexposure) {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure_auto' to %d", 1);
+    RCLCPP_INFO(this->get_logger(), "Setting 'auto_exposure' to %d", 1);
     RCLCPP_INFO(this->get_logger(), "Setting 'exposure' to %d", m_parameters.exposure);
     // turn down exposure control (from max of 3)
-    m_camera->set_v4l_parameter("exposure_auto", 1);
+    m_camera->set_v4l_parameter("auto_exposure", 1);
     // change the exposure level
     m_camera->set_v4l_parameter("exposure_absolute", m_parameters.exposure);
   } else {
-    RCLCPP_INFO(this->get_logger(), "Setting 'exposure_auto' to %d", 3);
-    m_camera->set_v4l_parameter("exposure_auto", 3);
+    RCLCPP_INFO(this->get_logger(), "Setting 'auto_exposure' to %d", 3);
+    m_camera->set_v4l_parameter("auto_exposure", 3);
   }
 
   // check auto focus
@@ -377,6 +405,13 @@ bool UsbCamNode::take_and_send_image()
 
   *m_camera_info_msg = m_camera_info->getCameraInfo();
   m_camera_info_msg->header = m_image_msg->header;
+  // Write and announce before handing the message on. step is passed through, so
+  // a padded v4l2 buffer is described honestly rather than assumed packed.
+  if (m_shm_publisher && !m_image_msg->data.empty()) {
+    m_shm_publisher->publish(
+      m_image_msg->data.data(), m_image_msg->data.size(), m_image_msg->width,
+      m_image_msg->height, m_image_msg->encoding, m_image_msg->step, m_image_msg->header);
+  }
   m_image_publisher->publish(*m_image_msg, *m_camera_info_msg);
   return true;
 }

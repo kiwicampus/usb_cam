@@ -42,6 +42,7 @@
 #include "sensor_msgs/msg/compressed_image.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 
+#include "shm_ros/publisher.hpp"
 #include "usb_cam/usb_cam.hpp"
 
 
@@ -82,6 +83,9 @@ public:
   sensor_msgs::msg::Image::UniquePtr m_image_msg;
   sensor_msgs::msg::CompressedImage::UniquePtr m_compressed_img_msg;
   std::shared_ptr<image_transport::CameraPublisher> m_image_publisher;
+  // Shared-memory mirror of the raw image: pixels into a segment, only the block
+  // id on the wire. Null when publish_shm is false.
+  std::unique_ptr<shm_ros::ImagePublisher> m_shm_publisher;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr m_compressed_image_publisher;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_compressed_cam_info_publisher;
 

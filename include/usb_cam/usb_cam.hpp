@@ -43,6 +43,10 @@ extern "C" {
 #include <string>
 #include <vector>
 
+#include <opencv2/opencv.hpp>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include "usb_cam/utils.hpp"
 #include "usb_cam/formats/pixel_format_base.hpp"
 #include "usb_cam/formats/av_pixel_format_helper.hpp"
@@ -96,24 +100,19 @@ std::vector<std::shared_ptr<pixel_format_base>> driver_supported_formats(
   return fmts;
 }
 
-typedef struct
+typedef struct capture_format_t
 {
   struct v4l2_fmtdesc format;
   struct v4l2_frmivalenum v4l2_fmt;
 } capture_format_t;
 
-typedef struct
+typedef struct parameters_t
 {
-  std::string camera_name;  // can be anything
-  std::string device_name;  // usually /dev/video0 or something similiar
+  std::string camera_name;
+  std::string device_name;
   std::string frame_id;
   std::string io_method_name;
   std::string camera_info_url;
-  // these parameters all have to be a combination supported by the device
-  // Use
-  // v4l2-ctl --device=0 --list-formats-ext
-  // to discover them,
-  // or guvcview
   std::string pixel_format_name;
   std::string av_device_format;
   int image_width;
@@ -130,9 +129,42 @@ typedef struct
   bool auto_white_balance;
   bool autoexposure;
   bool autofocus;
+  bool enable_undistortion;
+  int stabilization_frames;
+  bool enable_camera_controls;
+
+  parameters_t()
+// *INDENT-OFF*
+    : camera_name("usb_cam"),
+    device_name("/dev/video0"),
+    frame_id("camera"),
+    io_method_name("mmap"),
+    camera_info_url("package://usb_cam/config/camera_info.yaml"),
+    pixel_format_name("yuyv2rgb"),
+    av_device_format("YUV422P"),
+    image_width(600),
+    image_height(480),
+    framerate(30.0),
+    brightness(-1),
+    contrast(-1),
+    saturation(-1),
+    sharpness(-1),
+    gain(-1),
+    white_balance(-1),
+    exposure(-1),
+    focus(-1),
+    auto_white_balance(true),
+    autoexposure(true),
+    autofocus(false),
+    enable_undistortion(false),
+    stabilization_frames(10),
+    enable_camera_controls(false)
+  {
+  }
+// *INDENT-ON*
 } parameters_t;
 
-typedef struct
+typedef struct image_t
 {
   char * data;
   size_t width;
@@ -392,6 +424,14 @@ private:
 
   void uninit_device();
   void close_device();
+  
+  // Undistortion methods
+  void load_camera_calibration();
+  void init_undistortion_maps();
+  
+  // Camera control methods
+  void configure_camera_controls(const parameters_t & parameters);
+  void stabilize_auto_exposure(int frames);
 
   std::string m_device_name;
   usb_cam::utils::io_method_t m_io;
@@ -401,17 +441,22 @@ private:
   image_t m_image;
 
   AVFrame * m_avframe;
-  int m_avframe_size;
   AVCodec * m_avcodec;
-  AVCodecID m_codec_id;
   AVDictionary * m_avoptions;
   AVCodecContext * m_avcodec_context;
 
-  int64_t m_buffer_time_us;
   bool m_is_capturing;
   int m_framerate;
   const time_t m_epoch_time_shift_us;
   std::vector<capture_format_t> m_supported_formats;
+  
+  // Undistortion variables
+  bool m_enable_undistortion;
+  cv::Mat m_camera_matrix;
+  cv::Mat m_distortion_coeffs;
+  cv::Mat m_map1, m_map2;
+  cv::Mat m_undistorted_image;
+  std::string m_camera_info_url;
 };
 
 }  // namespace usb_cam
