@@ -662,12 +662,11 @@ std::vector<capture_format_t> UsbCam::get_supported_formats()
           m_fd, VIDIOC_ENUM_FRAMEINTERVALS, current_interval) == 0;
         ++current_interval->index)
       {
-        if (current_interval->type == V4L2_FRMIVAL_TYPE_DISCRETE) {
-          capture_format_t capture_format;
-          capture_format.format = *current_format;
-          capture_format.v4l2_fmt = *current_interval;
-          m_supported_formats.push_back(capture_format);
-        }
+        // stepwise intervals (Luxonis UVC) hold their minimum in the discrete slot
+        capture_format_t capture_format;
+        capture_format.format = *current_format;
+        capture_format.v4l2_fmt = *current_interval;
+        m_supported_formats.push_back(capture_format);
       }  // interval loop
     }  // size loop
   }  // fmt loop

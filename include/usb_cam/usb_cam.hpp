@@ -57,6 +57,7 @@ extern "C" {
 #include "usb_cam/formats/uyvy.hpp"
 #include "usb_cam/formats/yuyv.hpp"
 #include "usb_cam/formats/m420.hpp"
+#include "usb_cam/formats/nv12.hpp"
 
 
 namespace usb_cam
@@ -78,6 +79,7 @@ using usb_cam::formats::Y102MONO8;
 using usb_cam::formats::RAW_MJPEG;
 using usb_cam::formats::MJPEG2RGB;
 using usb_cam::formats::M4202RGB;
+using usb_cam::formats::NV122RGB;
 
 
 /// @brief list all supported formats that this driver supports
@@ -96,6 +98,7 @@ std::vector<std::shared_ptr<pixel_format_base>> driver_supported_formats(
     std::make_shared<RAW_MJPEG>(args),
     std::make_shared<MJPEG2RGB>(args),
     std::make_shared<M4202RGB>(args),
+    std::make_shared<NV122RGB>(args),
   };
   return fmts;
 }
