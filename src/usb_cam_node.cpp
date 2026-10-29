@@ -26,8 +26,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#include <cstring>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -89,6 +91,11 @@ UsbCamNode::UsbCamNode(const rclcpp::NodeOptions & node_options)
   // Mirror every raw frame into shared memory, announced as shm_ros/ShmImage on
   // <image topic>_shm. The segment is only created once something subscribes.
   this->declare_parameter("publish_shm", true);
+  // Clockwise rotation of the raw image in degrees, for a camera mounted rotated.
+  m_image_rotation = this->declare_parameter("image_rotation", 0);
+  if (m_image_rotation % 90 != 0 || m_image_rotation < 0 || m_image_rotation >= 360) {
+    throw std::invalid_argument("image_rotation must be 0, 90, 180 or 270");
+  }
 
   if (this->get_parameter("publish_shm").as_bool()) {
     m_shm_publisher = std::make_unique<shm_ros::ImagePublisher>(
@@ -194,6 +201,9 @@ void UsbCamNode::init()
   // if pixel format is equal to 'mjpeg', i.e. raw mjpeg stream, initialize compressed image message
   // and publisher
   if (m_parameters.pixel_format_name == "mjpeg") {
+    if (m_image_rotation != 0) {
+      RCLCPP_WARN(this->get_logger(), "image_rotation does not apply to the raw mjpeg stream");
+    }
     m_compressed_img_msg.reset(new sensor_msgs::msg::CompressedImage());
     m_compressed_img_msg->header.frame_id = m_parameters.frame_id;
     m_compressed_image_publisher =
@@ -398,6 +408,9 @@ bool UsbCamNode::take_and_send_image()
 
   // grab the image, pass image msg buffer to fill
   m_camera->get_image(reinterpret_cast<char *>(&m_image_msg->data[0]));
+  if (m_image_rotation != 0) {
+    rotate_image(*m_image_msg, m_image_rotation);
+  }
 
   auto stamp = m_camera->get_image_timestamp();
   m_image_msg->header.stamp.sec = stamp.tv_sec;
@@ -414,6 +427,25 @@ bool UsbCamNode::take_and_send_image()
   }
   m_image_publisher->publish(*m_image_msg, *m_camera_info_msg);
   return true;
+}
+
+void UsbCamNode::rotate_image(sensor_msgs::msg::Image & image, int degrees)
+{
+  // Each pixel's bytes move as one unit, so this works for any packed format.
+  // shortcut: yuyv/uyvy share chroma between pixel pairs and come out wrong;
+  // use a *2rgb pixel_format with a rotated camera.
+  const int bytes_per_pixel = static_cast<int>(image.step / image.width);
+  const cv::Mat source(
+    image.height, image.width, CV_8UC(bytes_per_pixel), image.data.data(), image.step);
+  cv::Mat rotated;
+  cv::rotate(
+    source, rotated,
+    degrees == 90 ? cv::ROTATE_90_CLOCKWISE :
+    degrees == 180 ? cv::ROTATE_180 : cv::ROTATE_90_COUNTERCLOCKWISE);
+  image.width = rotated.cols;
+  image.height = rotated.rows;
+  image.step = static_cast<uint32_t>(rotated.step);
+  std::memcpy(image.data.data(), rotated.data, rotated.total() * rotated.elemSize());
 }
 
 bool UsbCamNode::take_and_send_image_mjpeg()

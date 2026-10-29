@@ -69,6 +69,8 @@ public:
   void update();
   bool take_and_send_image();
   bool take_and_send_image_mjpeg();
+  // Rotates in place; camera_info keeps the unrotated calibration.
+  static void rotate_image(sensor_msgs::msg::Image & image, int degrees);
 
   rcl_interfaces::msg::SetParametersResult parameters_callback(
     const std::vector<rclcpp::Parameter> & parameters);
@@ -86,6 +88,7 @@ public:
   // Shared-memory mirror of the raw image: pixels into a segment, only the block
   // id on the wire. Null when publish_shm is false.
   std::unique_ptr<shm_ros::ImagePublisher> m_shm_publisher;
+  int m_image_rotation{0};
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr m_compressed_image_publisher;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr m_compressed_cam_info_publisher;
 
